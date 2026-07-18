@@ -24,6 +24,7 @@ const configBody = document.getElementById('config-body');
 const wakeWordEnabled = document.getElementById('wake-word-enabled');
 const wakeWordInput = document.getElementById('wake-word-input');
 const wakeWordGroup = document.getElementById('wake-word-group');
+const sleepWordInput = document.getElementById('sleep-word-input');
 
 // State Variables
 let websocket = null;
@@ -71,6 +72,11 @@ if (savedWakeWord) {
   wakeWordInput.value = savedWakeWord;
 }
 
+const savedSleepWord = localStorage.getItem('gemini_sleep_word');
+if (savedSleepWord) {
+  sleepWordInput.value = savedSleepWord;
+}
+
 // Wake Word UI Listeners
 wakeWordEnabled.addEventListener('change', () => {
   wakeWordGroup.style.display = wakeWordEnabled.checked ? 'flex' : 'none';
@@ -79,6 +85,10 @@ wakeWordEnabled.addEventListener('change', () => {
 
 wakeWordInput.addEventListener('change', () => {
   localStorage.setItem('gemini_wake_word', wakeWordInput.value.trim());
+});
+
+sleepWordInput.addEventListener('change', () => {
+  localStorage.setItem('gemini_sleep_word', sleepWordInput.value.trim());
 });
 
 // Collapsible Config Panel
@@ -271,10 +281,12 @@ async function connect() {
   const voice = voiceSelect.value;
   let instructions = systemInstructions.value.trim();
 
-  // If Wake Word is enabled, inject standby guidelines to system instructions
+  // If Wake Word is enabled, inject standby and exit guidelines to system instructions
   if (wakeWordEnabled.checked) {
     const wakeWord = wakeWordInput.value.trim();
-    instructions += `\n\n[SYSTEM NOTICE: You are currently in STANDBY mode. Do NOT say anything or respond to the user's speech under any circumstances, unless the user explicitly calls your name "${wakeWord}" (or "ludens"). Once you hear the word "${wakeWord}", you must wake up, respond with a short welcoming reply like "네, 말씀하세요!" or "부르셨나요?", and then continue the conversation normally. If you do not hear "${wakeWord}", remain silent.]`;
+    const sleepWord = sleepWordInput.value.trim();
+    instructions += `\n\n[SYSTEM NOTICE: You are currently in STANDBY mode. Do NOT say anything or respond to the user's speech under any circumstances, unless the user explicitly calls your name "${wakeWord}" (or "ludens"). Once you hear the word "${wakeWord}" or its phonetic variations (like "루덴스", "루벤스", "루덴", "ludens", "luden"), you must wake up, respond with a short welcoming reply like "네, 말씀하세요!" or "부르셨나요?", and then continue the conversation normally.
+    Additionally, once you are awake, if the user says the exit keyword "${sleepWord}" (or "잘가", "종료", "끝"), you must say a brief polite goodbye (like "대화를 종료합니다" or "안녕히 가세요") and immediately return to silence/standby mode, ignoring any subsequent user speech until your name "${wakeWord}" is called again.]`;
   }
 
   // Gemini Multimodal Live API endpoint
@@ -450,6 +462,46 @@ function playChime() {
   }
 }
 
+// Play a high-quality descending double beep chime using Web Audio
+function playSleepChime() {
+  if (!playbackContext) return;
+  try {
+    const osc1 = playbackContext.createOscillator();
+    const gainNode1 = playbackContext.createGain();
+    
+    osc1.type = 'sine';
+    osc1.connect(gainNode1);
+    gainNode1.connect(playbackContext.destination);
+    
+    const now = playbackContext.currentTime;
+    
+    // First high note (E5)
+    osc1.frequency.setValueAtTime(659.25, now);
+    gainNode1.gain.setValueAtTime(0, now);
+    gainNode1.gain.linearRampToValueAtTime(0.12, now + 0.04);
+    gainNode1.gain.exponentialRampToValueAtTime(0.001, now + 0.22);
+    osc1.start(now);
+    osc1.stop(now + 0.25);
+    
+    // Second lower note (C5)
+    const osc2 = playbackContext.createOscillator();
+    const gainNode2 = playbackContext.createGain();
+    
+    osc2.type = 'sine';
+    osc2.connect(gainNode2);
+    gainNode2.connect(playbackContext.destination);
+    
+    osc2.frequency.setValueAtTime(523.25, now + 0.1);
+    gainNode2.gain.setValueAtTime(0, now + 0.1);
+    gainNode2.gain.linearRampToValueAtTime(0.12, now + 0.14);
+    gainNode2.gain.exponentialRampToValueAtTime(0.001, now + 0.32);
+    osc2.start(now + 0.1);
+    osc2.stop(now + 0.35);
+  } catch (e) {
+    console.warn('Failed to play sleep chime:', e);
+  }
+}
+
 // Initialize Audio Contexts (Capture and Playback)
 async function initAudio() {
   try {
@@ -541,16 +593,50 @@ function handleServerMessage(message) {
     if (transcript) {
       appendOrUpdateUserTranscript(transcript);
       
-      // Check for Wake Word in Standby Mode
+      // Check for Wake Word in Standby Mode (using space-stripped fuzzy matching and phonetic variations)
       if (isWaitingForWakeWord) {
-        const wakeWords = wakeWordInput.value.trim().toLowerCase().split(',').map(w => w.trim());
-        const lowerTranscript = transcript.toLowerCase();
-        const matched = wakeWords.some(w => w && lowerTranscript.includes(w));
+        const rawWakeWord = wakeWordInput.value.trim().toLowerCase();
+        
+        // Generate list of acceptable variations
+        const variations = [rawWakeWord];
+        // Strip spaces
+        variations.push(rawWakeWord.replace(/\s+/g, ''));
+        
+        // If the wake word contains "루덴스" or "ludens", automatically include common homophones/prefixes
+        if (rawWakeWord.includes('루덴스') || rawWakeWord.includes('ludens')) {
+          variations.push('루덴', 'luden', 'lude', '루벤', 'ruben', '누덴', '우덴', '유덴', '루댄', 'ludens');
+        }
+        
+        // Clean and prepare the user transcript by converting to lowercase and stripping spaces
+        const lowerTranscript = transcript.toLowerCase().replace(/\s+/g, '');
+        
+        // Check if any variation matches the transcript (or is a substring of it)
+        const matched = variations.some(v => v && (lowerTranscript.includes(v) || v.includes(lowerTranscript)));
         if (matched) {
-          console.log('Wake word detected via Gemini! Waking up.');
+          console.log(`Wake word detected via Gemini transcript ("${transcript}")! Waking up.`);
           isWaitingForWakeWord = false;
           playChime();
           updateStatus('READY');
+        }
+      }
+      // Check for Sleep Word (End Word) in Active Mode
+      else if (wakeWordEnabled.checked && !isWaitingForWakeWord) {
+        const rawSleepWord = sleepWordInput.value.trim().toLowerCase();
+        const sleepVariations = [rawSleepWord];
+        sleepVariations.push(rawSleepWord.replace(/\s+/g, ''));
+        
+        // If the sleep word contains "종료", automatically include common Korean endings/variations
+        if (rawSleepWord.includes('종료')) {
+          sleepVariations.push('대화종료', '종료해', '대화끝', '끝내자', '잘가', '안녕', '바이');
+        }
+        
+        const matchedSleep = sleepVariations.some(v => v && (lowerTranscript.includes(v) || v.includes(lowerTranscript)));
+        if (matchedSleep) {
+          console.log(`Sleep word detected via Gemini transcript ("${transcript}")! Going back to standby.`);
+          stopPlayback();
+          isWaitingForWakeWord = true;
+          playSleepChime();
+          updateStatus('WAITING_FOR_WAKE_WORD');
         }
       }
     }
