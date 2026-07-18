@@ -42,6 +42,7 @@ let appState = 'DISCONNECTED'; // DISCONNECTED, CONNECTING, READY, SPEAKING, INT
 
 // Wake Word State Variables
 let isWaitingForWakeWord = false;
+let isTransitioningToStandby = false; // Flag to wait for goodbye speech before standby
 
 // Audio queue scheduling
 let nextStartTime = 0;
@@ -285,7 +286,10 @@ async function connect() {
   if (wakeWordEnabled.checked) {
     const wakeWord = wakeWordInput.value.trim();
     const sleepWord = sleepWordInput.value.trim();
-    instructions += `\n\n[STANDBY RULE: You are currently in Standby Mode. Do not respond to any speech from the user unless they say your name "${wakeWord}". Once they say "${wakeWord}" (or "ludens"), wake up, greet them briefly, and converse normally. If they say "${sleepWord}" (or "종료", "잘가"), say a short goodbye and return to silent standby mode immediately. Never output any system status messages or text like "Standby Mode" or instructions on how to wake you up. Just remain quiet.]`;
+    instructions += `\n\n[STANDBY RULE: You are currently in Standby Mode. Do not respond to any speech from the user unless they say your name "${wakeWord}".
+    Always transcribe user speech in Korean characters (한글) unconditionally (e.g. transcribe 'ludens' or 'luden' as '루덴스' or '루덴').
+    Once they say "${wakeWord}" or its Korean phonetic variations (like "루덴스", "루벤스", "루덴", "우덴"), wake up, say a short welcoming reply (like "네, 말씀하세요!" or "부르셨나요?"), and converse normally.
+    If they say "${sleepWord}" (or "종료", "잘가"), you must say a polite goodbye containing "다음에 또 만나요" or "다음에 또 대화해요" and immediately return to silent standby mode, ignoring subsequent speech. Never output system status messages. Just remain quiet.]`;
   }
 
   // Gemini Multimodal Live API endpoint
@@ -605,9 +609,9 @@ function handleServerMessage(message) {
         // Strip spaces
         variations.push(rawWakeWord.replace(/\s+/g, ''));
         
-        // If the wake word contains "루덴스" or "ludens", automatically include common homophones/prefixes
+        // If the wake word contains "루덴스" or "ludens", automatically include common Korean homophones/prefixes
         if (rawWakeWord.includes('루덴스') || rawWakeWord.includes('ludens')) {
-          variations.push('루덴', 'luden', 'lude', '루벤', 'ruben', '누덴', '우덴', '유덴', '루댄', 'ludens');
+          variations.push('루덴', '루벤', '누덴', '우덴', '유덴', '루댄');
         }
         
         // Check if any variation matches the transcript (or is a substring of it)
@@ -620,7 +624,7 @@ function handleServerMessage(message) {
         }
       }
       // Check for Sleep Word (End Word) in Active Mode
-      else if (wakeWordEnabled.checked && !isWaitingForWakeWord) {
+      else if (wakeWordEnabled.checked && !isWaitingForWakeWord && !isTransitioningToStandby) {
         const rawSleepWord = sleepWordInput.value.trim().toLowerCase();
         const sleepVariations = [rawSleepWord];
         sleepVariations.push(rawSleepWord.replace(/\s+/g, ''));
@@ -632,11 +636,9 @@ function handleServerMessage(message) {
         
         const matchedSleep = sleepVariations.some(v => v && lowerTranscript.includes(v));
         if (matchedSleep) {
-          console.log(`Sleep word detected via Gemini transcript ("${transcript}")! Going back to standby.`);
-          stopPlayback();
-          isWaitingForWakeWord = true;
-          playSleepChime();
-          updateStatus('WAITING_FOR_WAKE_WORD');
+          console.log(`Sleep word detected via Gemini transcript ("${transcript}")! Transitioning to standby after goodbye.`);
+          isTransitioningToStandby = true;
+          // We do NOT stop playback or play sleep chime yet. We let the goodbye speech finish playing.
         }
       }
     }
@@ -682,7 +684,12 @@ function handleServerMessage(message) {
     console.log('Model turn complete.');
     // Keep speaking state until the final audio buffer is done playing
     if (activeSourceNodes.length === 0) {
-      if (!isWaitingForWakeWord) {
+      if (isTransitioningToStandby) {
+        isWaitingForWakeWord = true;
+        isTransitioningToStandby = false;
+        playSleepChime();
+        updateStatus('WAITING_FOR_WAKE_WORD');
+      } else if (!isWaitingForWakeWord) {
         updateStatus('READY');
       }
       currentGeminiBubble = null;
@@ -732,7 +739,12 @@ function playAudioChunk(float32Data) {
     
     // If all responses finished playing and server turn is complete, return to ready
     if (activeSourceNodes.length === 0 && !isMuted) {
-      if (!isWaitingForWakeWord) {
+      if (isTransitioningToStandby) {
+        isWaitingForWakeWord = true;
+        isTransitioningToStandby = false;
+        playSleepChime();
+        updateStatus('WAITING_FOR_WAKE_WORD');
+      } else if (!isWaitingForWakeWord) {
         updateStatus('READY');
       }
       currentGeminiBubble = null;
