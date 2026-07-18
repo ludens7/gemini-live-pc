@@ -20,6 +20,11 @@ const chatPlaceholder = document.getElementById('chat-placeholder');
 const btnToggleConfig = document.getElementById('btn-toggle-config');
 const configBody = document.getElementById('config-body');
 
+// Wake Word Elements
+const wakeWordEnabled = document.getElementById('wake-word-enabled');
+const wakeWordInput = document.getElementById('wake-word-input');
+const wakeWordGroup = document.getElementById('wake-word-group');
+
 // State Variables
 let websocket = null;
 let audioContext = null;      // Input mic context
@@ -33,6 +38,12 @@ let playbackAnalyser = null;
 let isConnected = false;
 let isMuted = false;
 let appState = 'DISCONNECTED'; // DISCONNECTED, CONNECTING, READY, SPEAKING, INTERRUPTED
+
+// Wake Word State Variables
+const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
+let recognition = null;
+let isWaitingForWakeWord = false;
+let wasWokenUp = false;
 
 // Audio queue scheduling
 let nextStartTime = 0;
@@ -52,6 +63,26 @@ const savedKey = localStorage.getItem(LOCAL_STORAGE_KEY);
 if (savedKey) {
   apiKeyInput.value = savedKey;
 }
+
+// Load Wake Word Config from localStorage
+const savedWakeWordEnabled = localStorage.getItem('gemini_wake_word_enabled') === 'true';
+wakeWordEnabled.checked = savedWakeWordEnabled;
+wakeWordGroup.style.display = savedWakeWordEnabled ? 'flex' : 'none';
+
+const savedWakeWord = localStorage.getItem('gemini_wake_word');
+if (savedWakeWord) {
+  wakeWordInput.value = savedWakeWord;
+}
+
+// Wake Word UI Listeners
+wakeWordEnabled.addEventListener('change', () => {
+  wakeWordGroup.style.display = wakeWordEnabled.checked ? 'flex' : 'none';
+  localStorage.setItem('gemini_wake_word_enabled', wakeWordEnabled.checked);
+});
+
+wakeWordInput.addEventListener('change', () => {
+  localStorage.setItem('gemini_wake_word', wakeWordInput.value.trim());
+});
 
 // Collapsible Config Panel
 btnToggleConfig.addEventListener('click', () => {
@@ -87,10 +118,14 @@ btnClearTranscript.addEventListener('click', () => {
 
 // Connection toggle handler
 btnToggleConnection.addEventListener('click', () => {
-  if (isConnected) {
+  if (isConnected || isWaitingForWakeWord) {
     disconnect();
   } else {
-    connect();
+    if (wakeWordEnabled.checked) {
+      startWakeWordDetection();
+    } else {
+      connect();
+    }
   }
 });
 
@@ -178,6 +213,16 @@ function updateStatus(state) {
       statusIndicator.classList.add('disconnected');
       btnToggleConnection.classList.remove('active');
       textConnection.textContent = 'Start Conversation';
+      btnToggleMute.disabled = true;
+      break;
+      
+    case 'WAITING_FOR_WAKE_WORD':
+      const word = wakeWordInput.value.trim();
+      statusText.textContent = `Standby (Say "${word}")`;
+      statusIndicator.classList.add('waiting-wake');
+      glowRing.classList.add('waiting-wake');
+      btnToggleConnection.classList.add('active');
+      textConnection.textContent = 'Cancel Standby';
       btnToggleMute.disabled = true;
       break;
       
@@ -278,6 +323,12 @@ async function connect() {
     await initAudio();
     isConnected = true;
     updateStatus('READY');
+    
+    // Play chime if woken up by wake word
+    if (wasWokenUp) {
+      playChime();
+      wasWokenUp = false;
+    }
   };
 
   websocket.onmessage = async (event) => {
@@ -316,6 +367,16 @@ async function connect() {
 function disconnect() {
   isConnected = false;
   
+  // Stop local Wake Word speech recognition if active
+  if (recognition) {
+    isWaitingForWakeWord = false;
+    try {
+      recognition.abort();
+    } catch(e){}
+    recognition = null;
+  }
+  isWaitingForWakeWord = false;
+  
   // Close WebSocket
   if (websocket) {
     if (websocket.readyState === WebSocket.OPEN) {
@@ -353,6 +414,127 @@ function disconnect() {
   currentUserBubble = null;
   currentGeminiBubble = null;
   console.log('App disconnected.');
+}
+
+// Start local Speech Recognition to wait for Wake Word
+function startWakeWordDetection() {
+  if (!SpeechRecognition) {
+    showNotification('Speech Recognition is not supported on this PC.', 'error');
+    return;
+  }
+
+  if (isWaitingForWakeWord) return;
+
+  const wakeWord = wakeWordInput.value.trim().toLowerCase();
+  if (!wakeWord) {
+    showNotification('Please enter a wake word.', 'error');
+    return;
+  }
+
+  try {
+    recognition = new SpeechRecognition();
+    recognition.continuous = true;
+    recognition.interimResults = true;
+    recognition.lang = 'ko-KR'; // Listen for Korean speech input
+
+    recognition.onresult = (event) => {
+      for (let i = event.resultIndex; i < event.results.length; ++i) {
+        const transcript = event.results[i][0].transcript.trim().toLowerCase();
+        console.log(`Speech recognized: "${transcript}"`);
+        if (transcript.includes(wakeWord)) {
+          console.log(`Wake word "${wakeWord}" detected! Waking up.`);
+          triggerWakeUp();
+          break;
+        }
+      }
+    };
+
+    recognition.onerror = (e) => {
+      console.warn('Speech recognition error:', e.error);
+      if (isWaitingForWakeWord && e.error !== 'aborted') {
+        setTimeout(() => {
+          if (isWaitingForWakeWord && recognition) {
+            try { recognition.start(); } catch(err){}
+          }
+        }, 1000);
+      }
+    };
+
+    recognition.onend = () => {
+      console.log('Speech recognition service disconnected.');
+      if (isWaitingForWakeWord) {
+        setTimeout(() => {
+          if (isWaitingForWakeWord && recognition) {
+            try { recognition.start(); } catch(err){}
+          }
+        }, 500);
+      }
+    };
+
+    isWaitingForWakeWord = true;
+    updateStatus('WAITING_FOR_WAKE_WORD');
+    chatPlaceholder.style.display = 'none';
+    recognition.start();
+    console.log(`Standby mode active. Listening for: "${wakeWord}"`);
+  } catch (err) {
+    console.error('Failed to start Speech Recognition:', err);
+    showNotification('Failed to initialize speech recognition.', 'error');
+    disconnect();
+  }
+}
+
+// Trigger conversation startup when Wake Word is detected
+function triggerWakeUp() {
+  if (recognition) {
+    isWaitingForWakeWord = false;
+    try {
+      recognition.abort();
+    } catch(e){}
+    recognition = null;
+  }
+  
+  wasWokenUp = true;
+  connect();
+}
+
+// Play a high-quality double beep chime using Web Audio
+function playChime() {
+  if (!playbackContext) return;
+  try {
+    const osc1 = playbackContext.createOscillator();
+    const gainNode1 = playbackContext.createGain();
+    
+    osc1.type = 'sine';
+    osc1.connect(gainNode1);
+    gainNode1.connect(playbackContext.destination);
+    
+    const now = playbackContext.currentTime;
+    
+    // First high note (C5)
+    osc1.frequency.setValueAtTime(523.25, now);
+    gainNode1.gain.setValueAtTime(0, now);
+    gainNode1.gain.linearRampToValueAtTime(0.12, now + 0.04);
+    gainNode1.gain.exponentialRampToValueAtTime(0.001, now + 0.22);
+    osc1.start(now);
+    osc1.stop(now + 0.25);
+    
+    // Second higher note (E5)
+    const osc2 = playbackContext.createOscillator();
+    const gainNode2 = playbackContext.createGain();
+    
+    osc2.type = 'sine';
+    osc2.connect(gainNode2);
+    gainNode2.connect(playbackContext.destination);
+    
+    osc2.frequency.setValueAtTime(659.25, now + 0.1);
+    gainNode2.gain.setValueAtTime(0, now + 0.1);
+    gainNode2.gain.linearRampToValueAtTime(0.12, now + 0.14);
+    gainNode2.gain.exponentialRampToValueAtTime(0.001, now + 0.32);
+    osc2.start(now + 0.1);
+    osc2.stop(now + 0.35);
+  } catch (e) {
+    console.warn('Failed to play chime:', e);
+  }
 }
 
 // Initialize Audio Contexts (Capture and Playback)

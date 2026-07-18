@@ -67,6 +67,18 @@
           </div>
           <div class="form-row">
             <div class="form-group">
+              <label class="checkbox-container">
+                <input type="checkbox" id="wake-word-enabled">
+                <span class="checkbox-label">Use Wake Word (호출어 대기 모드 활성화)</span>
+              </label>
+            </div>
+            <div class="form-group" id="wake-word-group" style="display: none;">
+              <label for="wake-word-input">Wake Word (호출어)</label>
+              <input type="text" id="wake-word-input" value="제미나이" placeholder="예: 제미나이, 하이 제미나이">
+            </div>
+          </div>
+          <div class="form-row">
+            <div class="form-group">
               <label for="voice-select">Voice Tone</label>
               <select id="voice-select">
                 <option value="Puck">Puck (Cheerful & energetic)</option>
