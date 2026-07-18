@@ -348,7 +348,11 @@ body {
 }
 
 .card-body {
-  padding: 24px;
+  padding: 20px 24px;
+}
+
+.config-card .card-body {
+  padding: 14px 20px;
 }
 
 /* Configuration Card Specifics */
@@ -379,7 +383,7 @@ body {
 .form-row {
   display: flex;
   gap: 16px;
-  margin-bottom: 16px;
+  margin-bottom: 10px;
 }
 
 .form-row:last-child {

@@ -4,9 +4,9 @@ const path = require('path');
 function createWindow() {
   const win = new BrowserWindow({
     width: 950,
-    height: 750,
+    height: 800,
     minWidth: 850,
-    minHeight: 650,
+    minHeight: 700,
     title: 'Gemini Live PC',
     icon: path.join(__dirname, 'icon.png'),
     autoHideMenuBar: true,
@@ -25,16 +25,16 @@ function createWindow() {
 }
 
 app.whenReady().then(() => {
-  // Automatically grant permission requests for microphone (media)
+  // Automatically grant permission requests for microphone (media) and speech recognition
   session.defaultSession.setPermissionCheckHandler((webContents, permission, requestingOrigin) => {
-    if (permission === 'media') {
+    if (permission === 'media' || permission === 'speech-recognition') {
       return true;
     }
     return false;
   });
 
   session.defaultSession.setPermissionRequestHandler((webContents, permission, callback, details) => {
-    if (permission === 'media') {
+    if (permission === 'media' || permission === 'speech-recognition') {
       callback(true);
     } else {
       callback(false);
