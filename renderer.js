@@ -285,8 +285,7 @@ async function connect() {
   if (wakeWordEnabled.checked) {
     const wakeWord = wakeWordInput.value.trim();
     const sleepWord = sleepWordInput.value.trim();
-    instructions += `\n\n[SYSTEM NOTICE: You are currently in STANDBY mode. Do NOT say anything or respond to the user's speech under any circumstances, unless the user explicitly calls your name "${wakeWord}" (or "ludens"). Once you hear the word "${wakeWord}" or its phonetic variations (like "루덴스", "루벤스", "루덴", "ludens", "luden"), you must wake up, respond with a short welcoming reply like "네, 말씀하세요!" or "부르셨나요?", and then continue the conversation normally.
-    Additionally, once you are awake, if the user says the exit keyword "${sleepWord}" (or "잘가", "종료", "끝"), you must say a brief polite goodbye (like "대화를 종료합니다" or "안녕히 가세요") and immediately return to silence/standby mode, ignoring any subsequent user speech until your name "${wakeWord}" is called again.]`;
+    instructions += `\n\n[STANDBY RULE: You are currently in Standby Mode. Do not respond to any speech from the user unless they say your name "${wakeWord}". Once they say "${wakeWord}" (or "ludens"), wake up, greet them briefly, and converse normally. If they say "${sleepWord}" (or "종료", "잘가"), say a short goodbye and return to silent standby mode immediately. Never output any system status messages or text like "Standby Mode" or instructions on how to wake you up. Just remain quiet.]`;
   }
 
   // Gemini Multimodal Live API endpoint
