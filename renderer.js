@@ -573,7 +573,9 @@ function handleServerMessage(message) {
   if (message.serverContent && message.serverContent.interrupted) {
     console.log('Model interrupted by user voice.');
     stopPlayback();
-    updateStatus('READY');
+    if (!isWaitingForWakeWord) {
+      updateStatus('READY');
+    }
     
     // Append an interrupted label in transcript
     if (currentGeminiBubble) {
@@ -682,7 +684,9 @@ function handleServerMessage(message) {
     console.log('Model turn complete.');
     // Keep speaking state until the final audio buffer is done playing
     if (activeSourceNodes.length === 0) {
-      updateStatus('READY');
+      if (!isWaitingForWakeWord) {
+        updateStatus('READY');
+      }
       currentGeminiBubble = null;
       currentUserBubble = null;
     }
@@ -730,7 +734,9 @@ function playAudioChunk(float32Data) {
     
     // If all responses finished playing and server turn is complete, return to ready
     if (activeSourceNodes.length === 0 && !isMuted) {
-      updateStatus('READY');
+      if (!isWaitingForWakeWord) {
+        updateStatus('READY');
+      }
       currentGeminiBubble = null;
       currentUserBubble = null;
     }
