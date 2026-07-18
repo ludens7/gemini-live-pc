@@ -3,9 +3,9 @@ const path = require('path');
 
 function createWindow() {
   const win = new BrowserWindow({
-    width: 950,
+    width: 1100,
     height: 800,
-    minWidth: 850,
+    minWidth: 950,
     minHeight: 700,
     title: 'Gemini Live PC',
     icon: path.join(__dirname, 'icon.png'),
