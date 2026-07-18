@@ -78,6 +78,9 @@ if (savedSleepWord) {
   sleepWordInput.value = savedSleepWord;
 }
 
+// Load Conversation History on Startup
+loadConversationHistory();
+
 // Wake Word UI Listeners
 wakeWordEnabled.addEventListener('change', () => {
   wakeWordGroup.style.display = wakeWordEnabled.checked ? 'flex' : 'none';
@@ -115,13 +118,16 @@ apiKeyInput.addEventListener('change', () => {
   localStorage.setItem(LOCAL_STORAGE_KEY, apiKeyInput.value.trim());
 });
 
-// Clear transcript
+// Clear transcript and stored history
 btnClearTranscript.addEventListener('click', () => {
   transcriptContainer.innerHTML = '';
   transcriptContainer.appendChild(chatPlaceholder);
   chatPlaceholder.style.display = 'flex';
   currentUserBubble = null;
   currentGeminiBubble = null;
+  lastSavedUserBubble = null;
+  localStorage.removeItem('gemini_chat_history');
+  showNotification('Conversation history cleared.', 'success');
 });
 
 // Connection toggle handler
@@ -290,6 +296,30 @@ async function connect() {
     Always transcribe user speech in Korean characters (한글) unconditionally (e.g. transcribe 'ludens' or 'luden' as '루덴스' or '루덴').
     Once they say "${wakeWord}" or its Korean phonetic variations (like "루덴스", "루벤스", "루덴", "우덴"), wake up, say a short welcoming reply (like "네, 말씀하세요!" or "부르셨나요?"), and converse normally.
     If they say "${sleepWord}" (or "종료", "잘가"), you must say a polite goodbye containing "다음에 또 만나요" or "다음에 또 대화해요" and immediately return to silent standby mode, ignoring subsequent speech. Never output system status messages. Just remain quiet.]`;
+  }
+
+  // Load past conversation history and feed it to system instructions
+  const savedHistory = localStorage.getItem('gemini_chat_history');
+  let historyText = '';
+  if (savedHistory) {
+    try {
+      const history = JSON.parse(savedHistory);
+      if (history && history.length > 0) {
+        historyText = '\n\n[PAST CONVERSATION CONTEXT (Use this to remember what was discussed previously):\n';
+        // Feed last 15 messages (7-8 turns) to stay within setup prompt limits comfortably
+        const recentHistory = history.slice(-15);
+        recentHistory.forEach(item => {
+          const roleLabel = item.role === 'user' ? 'User' : 'Model';
+          historyText += `${roleLabel}: ${item.text}\n`;
+        });
+        historyText += ']';
+      }
+    } catch(e) {
+      console.error('Failed to parse history for system instruction:', e);
+    }
+  }
+  if (historyText) {
+    instructions += historyText;
   }
 
   // Gemini Multimodal Live API endpoint
@@ -684,6 +714,8 @@ function handleServerMessage(message) {
     console.log('Model turn complete.');
     // Keep speaking state until the final audio buffer is done playing
     if (activeSourceNodes.length === 0) {
+      saveCurrentTurnToHistory();
+      
       if (isTransitioningToStandby) {
         isWaitingForWakeWord = true;
         isTransitioningToStandby = false;
@@ -739,6 +771,8 @@ function playAudioChunk(float32Data) {
     
     // If all responses finished playing and server turn is complete, return to ready
     if (activeSourceNodes.length === 0 && !isMuted) {
+      saveCurrentTurnToHistory();
+      
       if (isTransitioningToStandby) {
         isWaitingForWakeWord = true;
         isTransitioningToStandby = false;
@@ -822,6 +856,85 @@ function appendOrUpdateGeminiTranscript(text) {
 
 function scrollTranscriptToBottom() {
   transcriptContainer.scrollTop = transcriptContainer.scrollHeight;
+}
+
+// --- CONVERSATION HISTORY UTILITIES ---
+let lastSavedUserBubble = null;
+
+function loadConversationHistory() {
+  const historyJson = localStorage.getItem('gemini_chat_history');
+  if (historyJson) {
+    try {
+      const history = JSON.parse(historyJson);
+      if (history && history.length > 0) {
+        chatPlaceholder.style.display = 'none';
+        history.forEach(item => {
+          if (item.role === 'user') {
+            appendUserBubbleStatic(item.text);
+          } else if (item.role === 'model') {
+            appendGeminiBubbleStatic(item.text);
+          }
+        });
+        scrollTranscriptToBottom();
+      }
+    } catch(e) {
+      console.error('Failed to parse chat history:', e);
+    }
+  }
+}
+
+function appendUserBubbleStatic(text) {
+  const messageRow = document.createElement('div');
+  messageRow.className = 'message message-user';
+  messageRow.innerHTML = `
+    <div class="message-label">🎙️ User</div>
+    <div class="message-bubble">${text}</div>
+  `;
+  transcriptContainer.appendChild(messageRow);
+}
+
+function appendGeminiBubbleStatic(text) {
+  const messageRow = document.createElement('div');
+  messageRow.className = 'message message-gemini';
+  messageRow.innerHTML = `
+    <div class="message-label">✨ Gemini</div>
+    <div class="message-bubble">${text}</div>
+  `;
+  transcriptContainer.appendChild(messageRow);
+}
+
+function saveCurrentTurnToHistory() {
+  if (!currentUserBubble || !currentGeminiBubble) return;
+  if (currentUserBubble === lastSavedUserBubble) return;
+  
+  const userBubble = currentUserBubble.querySelector('.message-bubble');
+  const geminiBubble = currentGeminiBubble.querySelector('.message-bubble');
+  
+  if (userBubble && geminiBubble) {
+    const userText = userBubble.textContent.trim();
+    const geminiText = geminiBubble.textContent.trim();
+    
+    // Ignore short commands/system messages if any
+    if (userText && geminiText) {
+      let history = [];
+      const saved = localStorage.getItem('gemini_chat_history');
+      if (saved) {
+        try { history = JSON.parse(saved); } catch(e){}
+      }
+      
+      history.push({ role: 'user', text: userText });
+      history.push({ role: 'model', text: geminiText });
+      
+      // Limit history to the last 50 entries to keep local storage lightweight
+      if (history.length > 50) {
+        history = history.slice(history.length - 50);
+      }
+      
+      localStorage.setItem('gemini_chat_history', JSON.stringify(history));
+      lastSavedUserBubble = currentUserBubble;
+      console.log('Conversation turn saved to history.');
+    }
+  }
 }
 
 // Alert notifications
