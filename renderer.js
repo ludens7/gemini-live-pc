@@ -612,7 +612,7 @@ function handleServerMessage(message) {
         const lowerTranscript = transcript.toLowerCase().replace(/\s+/g, '');
         
         // Check if any variation matches the transcript (or is a substring of it)
-        const matched = variations.some(v => v && (lowerTranscript.includes(v) || v.includes(lowerTranscript)));
+        const matched = variations.some(v => v && lowerTranscript.includes(v));
         if (matched) {
           console.log(`Wake word detected via Gemini transcript ("${transcript}")! Waking up.`);
           isWaitingForWakeWord = false;
@@ -631,7 +631,7 @@ function handleServerMessage(message) {
           sleepVariations.push('대화종료', '종료해', '대화끝', '끝내자', '잘가', '안녕', '바이');
         }
         
-        const matchedSleep = sleepVariations.some(v => v && (lowerTranscript.includes(v) || v.includes(lowerTranscript)));
+        const matchedSleep = sleepVariations.some(v => v && lowerTranscript.includes(v));
         if (matchedSleep) {
           console.log(`Sleep word detected via Gemini transcript ("${transcript}")! Going back to standby.`);
           stopPlayback();
