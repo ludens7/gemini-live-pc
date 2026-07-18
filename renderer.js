@@ -40,10 +40,7 @@ let isMuted = false;
 let appState = 'DISCONNECTED'; // DISCONNECTED, CONNECTING, READY, SPEAKING, INTERRUPTED
 
 // Wake Word State Variables
-const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
-let recognition = null;
 let isWaitingForWakeWord = false;
-let wasWokenUp = false;
 
 // Audio queue scheduling
 let nextStartTime = 0;
@@ -122,10 +119,9 @@ btnToggleConnection.addEventListener('click', () => {
     disconnect();
   } else {
     if (wakeWordEnabled.checked) {
-      startWakeWordDetection();
-    } else {
-      connect();
+      isWaitingForWakeWord = true;
     }
+    connect();
   }
 });
 
@@ -273,7 +269,13 @@ async function connect() {
 
   const model = modelSelect.value;
   const voice = voiceSelect.value;
-  const instructions = systemInstructions.value.trim();
+  let instructions = systemInstructions.value.trim();
+
+  // If Wake Word is enabled, inject standby guidelines to system instructions
+  if (wakeWordEnabled.checked) {
+    const wakeWord = wakeWordInput.value.trim();
+    instructions += `\n\n[SYSTEM NOTICE: You are currently in STANDBY mode. Do NOT say anything or respond to the user's speech under any circumstances, unless the user explicitly calls your name "${wakeWord}" (or "ludens"). Once you hear the word "${wakeWord}", you must wake up, respond with a short welcoming reply like "네, 말씀하세요!" or "부르셨나요?", and then continue the conversation normally. If you do not hear "${wakeWord}", remain silent.]`;
+  }
 
   // Gemini Multimodal Live API endpoint
   const url = `wss://generativelanguage.googleapis.com/ws/google.ai.generativelanguage.v1beta.GenerativeService.BidiGenerateContent?key=${apiKey}`;
@@ -322,12 +324,11 @@ async function connect() {
     // Initialize Audio Capture & Playback
     await initAudio();
     isConnected = true;
-    updateStatus('READY');
     
-    // Play chime if woken up by wake word
-    if (wasWokenUp) {
-      playChime();
-      wasWokenUp = false;
+    if (isWaitingForWakeWord) {
+      updateStatus('WAITING_FOR_WAKE_WORD');
+    } else {
+      updateStatus('READY');
     }
   };
 
@@ -366,15 +367,6 @@ async function connect() {
 // Disconnect Websocket & Release Audio
 function disconnect() {
   isConnected = false;
-  
-  // Stop local Wake Word speech recognition if active
-  if (recognition) {
-    isWaitingForWakeWord = false;
-    try {
-      recognition.abort();
-    } catch(e){}
-    recognition = null;
-  }
   isWaitingForWakeWord = false;
   
   // Close WebSocket
@@ -416,86 +408,7 @@ function disconnect() {
   console.log('App disconnected.');
 }
 
-// Start local Speech Recognition to wait for Wake Word
-function startWakeWordDetection() {
-  if (!SpeechRecognition) {
-    showNotification('Speech Recognition is not supported on this PC.', 'error');
-    return;
-  }
-
-  if (isWaitingForWakeWord) return;
-
-  const wakeWord = wakeWordInput.value.trim().toLowerCase();
-  if (!wakeWord) {
-    showNotification('Please enter a wake word.', 'error');
-    return;
-  }
-
-  try {
-    recognition = new SpeechRecognition();
-    recognition.continuous = true;
-    recognition.interimResults = true;
-    recognition.lang = 'ko-KR'; // Listen for Korean speech input
-
-    recognition.onresult = (event) => {
-      for (let i = event.resultIndex; i < event.results.length; ++i) {
-        const transcript = event.results[i][0].transcript.trim().toLowerCase();
-        console.log(`Speech recognized: "${transcript}"`);
-        if (transcript.includes(wakeWord)) {
-          console.log(`Wake word "${wakeWord}" detected! Waking up.`);
-          triggerWakeUp();
-          break;
-        }
-      }
-    };
-
-    recognition.onerror = (e) => {
-      console.warn('Speech recognition error:', e.error);
-      if (isWaitingForWakeWord && e.error !== 'aborted') {
-        setTimeout(() => {
-          if (isWaitingForWakeWord && recognition) {
-            try { recognition.start(); } catch(err){}
-          }
-        }, 1000);
-      }
-    };
-
-    recognition.onend = () => {
-      console.log('Speech recognition service disconnected.');
-      if (isWaitingForWakeWord) {
-        setTimeout(() => {
-          if (isWaitingForWakeWord && recognition) {
-            try { recognition.start(); } catch(err){}
-          }
-        }, 500);
-      }
-    };
-
-    isWaitingForWakeWord = true;
-    updateStatus('WAITING_FOR_WAKE_WORD');
-    chatPlaceholder.style.display = 'none';
-    recognition.start();
-    console.log(`Standby mode active. Listening for: "${wakeWord}"`);
-  } catch (err) {
-    console.error('Failed to start Speech Recognition:', err);
-    showNotification('Failed to initialize speech recognition.', 'error');
-    disconnect();
-  }
-}
-
-// Trigger conversation startup when Wake Word is detected
-function triggerWakeUp() {
-  if (recognition) {
-    isWaitingForWakeWord = false;
-    try {
-      recognition.abort();
-    } catch(e){}
-    recognition = null;
-  }
-  
-  wasWokenUp = true;
-  connect();
-}
+// (Local Speech Recognition deprecated in favor of Gemini Server-Side VAD matching)
 
 // Play a high-quality double beep chime using Web Audio
 function playChime() {
@@ -627,6 +540,19 @@ function handleServerMessage(message) {
     const transcript = message.serverContent.inputTranscription.text;
     if (transcript) {
       appendOrUpdateUserTranscript(transcript);
+      
+      // Check for Wake Word in Standby Mode
+      if (isWaitingForWakeWord) {
+        const wakeWords = wakeWordInput.value.trim().toLowerCase().split(',').map(w => w.trim());
+        const lowerTranscript = transcript.toLowerCase();
+        const matched = wakeWords.some(w => w && lowerTranscript.includes(w));
+        if (matched) {
+          console.log('Wake word detected via Gemini! Waking up.');
+          isWaitingForWakeWord = false;
+          playChime();
+          updateStatus('READY');
+        }
+      }
     }
   }
 
@@ -637,6 +563,10 @@ function handleServerMessage(message) {
     parts.forEach(part => {
       // Handle Audio Stream
       if (part.inlineData && part.inlineData.mimeType.startsWith('audio/')) {
+        if (isWaitingForWakeWord) {
+          console.log('Discarding model audio during standby.');
+          return;
+        }
         const audioBase64 = part.inlineData.data;
         const pcmBuffer = base64ToArrayBuffer(audioBase64);
         const float32Samples = pcm16ToFloat32(pcmBuffer);
@@ -646,6 +576,7 @@ function handleServerMessage(message) {
       
       // Handle Text Transcript (if returned directly)
       if (part.text) {
+        if (isWaitingForWakeWord) return;
         appendOrUpdateGeminiTranscript(part.text);
       }
     });
@@ -655,6 +586,7 @@ function handleServerMessage(message) {
   if (message.serverContent && message.serverContent.outputTranscription) {
     const transcript = message.serverContent.outputTranscription.text;
     if (transcript) {
+      if (isWaitingForWakeWord) return;
       appendOrUpdateGeminiTranscript(transcript);
     }
   }
