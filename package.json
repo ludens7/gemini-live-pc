@@ -1,0 +1,39 @@
+{
+  "name": "gemini-live-pc",
+  "version": "1.0.0",
+  "description": "Native PC Voice Chat Client for Gemini Multimodal Live API",
+  "main": "main.js",
+  "scripts": {
+    "start": "electron .",
+    "build": "electron-builder",
+    "package": "electron-packager . \"Gemini Live PC\" --platform=win32 --arch=x64 --out=dist --overwrite"
+  },
+  "keywords": [
+    "gemini",
+    "live",
+    "voice",
+    "chat",
+    "electron",
+    "pc"
+  ],
+  "author": "Antigravity",
+  "license": "ISC",
+  "devDependencies": {
+    "electron": "^31.7.7",
+    "electron-builder": "^24.13.3",
+    "electron-packager": "^17.1.2"
+  },
+  "build": {
+    "appId": "com.gemini.livepc",
+    "productName": "Gemini Live PC",
+    "directories": {
+      "output": "dist"
+    },
+    "win": {
+      "target": "nsis"
+    }
+  },
+  "allowScripts": {
+    "electron@31.7.7": true
+  }
+}

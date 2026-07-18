@@ -1,0 +1,122 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Gemini Live PC</title>
+  <!-- Google Fonts for premium typography -->
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Outfit:wght@300;400;600;700&family=Inter:wght@300;400;500;600&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="styles.css">
+</head>
+<body>
+  <div class="app-container">
+    
+    <!-- Left Sidebar: Voice Visualizer & Main Controls -->
+    <aside class="sidebar">
+      <div class="brand">
+        <div class="logo">
+          <div class="logo-inner"></div>
+        </div>
+        <h1>Gemini Live <span class="badge">PC</span></h1>
+      </div>
+
+      <div class="visualizer-container">
+        <!-- Glowing ring around visualizer -->
+        <div class="glow-ring" id="glow-ring"></div>
+        <canvas id="canvas-visualizer" width="300" height="300"></canvas>
+        <div class="visualizer-overlay">
+          <div class="status-dot disconnected" id="status-indicator"></div>
+          <span class="status-label" id="status-text">Disconnected</span>
+        </div>
+      </div>
+
+      <div class="controls-main">
+        <button id="btn-toggle-connection" class="btn btn-primary btn-pulse">
+          <span class="icon">⚡</span> <span id="text-connection">Start Conversation</span>
+        </button>
+        <button id="btn-toggle-mute" class="btn btn-secondary" disabled>
+          <span class="icon" id="icon-mute">🎙️</span> <span id="text-mute">Mute Mic</span>
+        </button>
+      </div>
+
+      <div class="app-info">
+        <p>VAD (Voice Activity Detection) active. Speak to converse. Gemini will interrupt when you speak.</p>
+      </div>
+    </aside>
+
+    <!-- Main Panel: Configuration & Real-time Transcript -->
+    <main class="main-content">
+      
+      <!-- Top Section: Config Panel (Card) -->
+      <section class="card config-card">
+        <div class="card-header">
+          <h2>Configuration Settings</h2>
+          <button id="btn-toggle-config" class="btn-icon" title="Toggle settings view">⚙️</button>
+        </div>
+        <div class="card-body" id="config-body">
+          <div class="form-row">
+            <div class="form-group flex-2">
+              <label for="api-key-input">Gemini API Key</label>
+              <div class="input-with-action">
+                <input type="password" id="api-key-input" placeholder="Enter your Gemini API Key..." autocomplete="off">
+                <button id="btn-load-env" class="btn btn-small" title="Load from environment variable">Load Env</button>
+              </div>
+            </div>
+          </div>
+          <div class="form-row">
+            <div class="form-group">
+              <label for="voice-select">Voice Tone</label>
+              <select id="voice-select">
+                <option value="Puck">Puck (Cheerful & energetic)</option>
+                <option value="Charon">Charon (Calm & deep)</option>
+                <option value="Kore">Kore (Warm & friendly)</option>
+                <option value="Fenrir">Fenrir (Deep & powerful)</option>
+                <option value="Aoede" selected>Aoede (Soft & clear)</option>
+                <option value="Leda">Leda (Bright & clear)</option>
+                <option value="Orus">Orus (Natural & balanced)</option>
+                <option value="Zephyr">Zephyr (Light & breezy)</option>
+              </select>
+            </div>
+            <div class="form-group">
+              <label for="model-select">Model</label>
+              <select id="model-select">
+                <option value="models/gemini-3.1-flash-live-preview" selected>Gemini 3.1 Flash Live Preview (Default)</option>
+                <option value="models/gemini-2.5-flash">Gemini 2.5 Flash (Latest)</option>
+                <option value="models/gemini-2.0-flash">Gemini 2.0 Flash (Stable)</option>
+              </select>
+            </div>
+          </div>
+          <div class="form-row">
+            <div class="form-group">
+              <label for="system-instructions">System Instructions</label>
+              <textarea id="system-instructions" placeholder="Enter custom AI personality prompts (e.g., 'You are a warm, supportive language tutor...')" rows="2">You are a friendly, encouraging, and highly conversational AI voice assistant. Speak naturally, keep responses concise for voice chat, and ask engaging questions.</textarea>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <!-- Bottom Section: Real-time Transcripts -->
+      <section class="card transcript-card">
+        <div class="card-header">
+          <h2>Live Conversation Transcript</h2>
+          <button id="btn-clear-transcript" class="btn btn-small btn-danger">Clear History</button>
+        </div>
+        <div class="card-body transcript-body" id="transcript-container">
+          <div class="chat-placeholder" id="chat-placeholder">
+            <div class="placeholder-icon">💬</div>
+            <p>Your conversation log will appear here in real-time.</p>
+            <p class="placeholder-tip">Connect and start speaking to view live transcripts.</p>
+          </div>
+          <!-- Chat bubbles will go here -->
+        </div>
+      </section>
+
+    </main>
+
+  </div>
+
+  <script src="renderer.js"></script>
+</body>
+</html>
