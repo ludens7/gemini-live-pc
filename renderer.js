@@ -26,6 +26,10 @@ const wakeWordInput = document.getElementById('wake-word-input');
 const wakeWordGroup = document.getElementById('wake-word-group');
 const sleepWordInput = document.getElementById('sleep-word-input');
 
+// Session Manager Elements
+const btnNewSession = document.getElementById('btn-new-session');
+const sessionsList = document.getElementById('sessions-list');
+
 // State Variables
 let websocket = null;
 let audioContext = null;      // Input mic context
@@ -43,6 +47,10 @@ let appState = 'DISCONNECTED'; // DISCONNECTED, CONNECTING, READY, SPEAKING, INT
 // Wake Word State Variables
 let isWaitingForWakeWord = false;
 let isTransitioningToStandby = false; // Flag to wait for goodbye speech before standby
+
+// Session Manager State Variables
+let sessions = [];
+let currentSessionId = null;
 
 // Audio queue scheduling
 let nextStartTime = 0;
@@ -78,8 +86,8 @@ if (savedSleepWord) {
   sleepWordInput.value = savedSleepWord;
 }
 
-// Load Conversation History on Startup
-loadConversationHistory();
+// Initialize Sessions & Load History on Startup
+initSessions();
 
 // Wake Word UI Listeners
 wakeWordEnabled.addEventListener('change', () => {
@@ -118,16 +126,17 @@ apiKeyInput.addEventListener('change', () => {
   localStorage.setItem(LOCAL_STORAGE_KEY, apiKeyInput.value.trim());
 });
 
-// Clear transcript and stored history
+// Clear transcript and stored history of active session
 btnClearTranscript.addEventListener('click', () => {
-  transcriptContainer.innerHTML = '';
-  transcriptContainer.appendChild(chatPlaceholder);
-  chatPlaceholder.style.display = 'flex';
-  currentUserBubble = null;
-  currentGeminiBubble = null;
-  lastSavedUserBubble = null;
-  localStorage.removeItem('gemini_chat_history');
-  showNotification('Conversation history cleared.', 'success');
+  const activeSession = sessions.find(s => s.id === currentSessionId);
+  if (activeSession) {
+    activeSession.history = [];
+    activeSession.title = '새 대화';
+    localStorage.setItem('gemini_sessions', JSON.stringify(sessions));
+    renderSessionsList();
+    loadConversationHistory();
+    showNotification('현재 대화 이력이 초기화되었습니다.', 'success');
+  }
 });
 
 // Connection toggle handler
@@ -299,21 +308,18 @@ async function connect() {
   }
 
   // Load past conversation history and feed it to system instructions
-  const savedHistory = localStorage.getItem('gemini_chat_history');
+  const activeSession = sessions.find(s => s.id === currentSessionId);
   let historyText = '';
-  if (savedHistory) {
+  if (activeSession && activeSession.history && activeSession.history.length > 0) {
     try {
-      const history = JSON.parse(savedHistory);
-      if (history && history.length > 0) {
-        historyText = '\n\n[PAST CONVERSATION CONTEXT (Use this to remember what was discussed previously):\n';
-        // Feed last 15 messages (7-8 turns) to stay within setup prompt limits comfortably
-        const recentHistory = history.slice(-15);
-        recentHistory.forEach(item => {
-          const roleLabel = item.role === 'user' ? 'User' : 'Model';
-          historyText += `${roleLabel}: ${item.text}\n`;
-        });
-        historyText += ']';
-      }
+      historyText = '\n\n[PAST CONVERSATION CONTEXT (Use this to remember what was discussed previously):\n';
+      // Feed last 15 messages (7-8 turns) to stay within setup prompt limits comfortably
+      const recentHistory = activeSession.history.slice(-15);
+      recentHistory.forEach(item => {
+        const roleLabel = item.role === 'user' ? 'User' : 'Model';
+        historyText += `${roleLabel}: ${item.text}\n`;
+      });
+      historyText += ']';
     } catch(e) {
       console.error('Failed to parse history for system instruction:', e);
     }
@@ -858,28 +864,202 @@ function scrollTranscriptToBottom() {
   transcriptContainer.scrollTop = transcriptContainer.scrollHeight;
 }
 
-// --- CONVERSATION HISTORY UTILITIES ---
+// --- CONVERSATION SESSION & HISTORY UTILITIES ---
 let lastSavedUserBubble = null;
 
-function loadConversationHistory() {
-  const historyJson = localStorage.getItem('gemini_chat_history');
-  if (historyJson) {
+function initSessions() {
+  const savedSessions = localStorage.getItem('gemini_sessions');
+  const savedCurrentId = localStorage.getItem('gemini_current_session_id');
+  
+  if (savedSessions) {
     try {
-      const history = JSON.parse(historyJson);
-      if (history && history.length > 0) {
-        chatPlaceholder.style.display = 'none';
-        history.forEach(item => {
-          if (item.role === 'user') {
-            appendUserBubbleStatic(item.text);
-          } else if (item.role === 'model') {
-            appendGeminiBubbleStatic(item.text);
-          }
-        });
-        scrollTranscriptToBottom();
-      }
-    } catch(e) {
-      console.error('Failed to parse chat history:', e);
+      sessions = JSON.parse(savedSessions);
+    } catch (e) {
+      sessions = [];
     }
+  }
+  
+  if (!sessions || sessions.length === 0) {
+    const defaultSession = {
+      id: 'session_' + Date.now(),
+      title: '새 대화',
+      createdAt: Date.now(),
+      history: []
+    };
+    sessions = [defaultSession];
+    currentSessionId = defaultSession.id;
+    localStorage.setItem('gemini_sessions', JSON.stringify(sessions));
+    localStorage.setItem('gemini_current_session_id', currentSessionId);
+  } else {
+    currentSessionId = savedCurrentId;
+    if (!sessions.some(s => s.id === currentSessionId)) {
+      currentSessionId = sessions[0].id;
+      localStorage.setItem('gemini_current_session_id', currentSessionId);
+    }
+  }
+  
+  renderSessionsList();
+  loadConversationHistory();
+}
+
+function renderSessionsList() {
+  sessionsList.innerHTML = '';
+  
+  sessions.forEach(session => {
+    const isActive = session.id === currentSessionId;
+    
+    const item = document.createElement('div');
+    item.className = `session-item ${isActive ? 'active' : ''}`;
+    
+    const mainArea = document.createElement('div');
+    mainArea.className = 'session-main';
+    
+    const icon = document.createElement('span');
+    icon.className = 'session-icon';
+    icon.textContent = '💬';
+    
+    const titleSpan = document.createElement('span');
+    titleSpan.className = 'session-title';
+    titleSpan.textContent = session.title;
+    
+    mainArea.appendChild(icon);
+    mainArea.appendChild(titleSpan);
+    item.appendChild(mainArea);
+    
+    const actions = document.createElement('div');
+    actions.className = 'session-actions';
+    
+    const btnRename = document.createElement('button');
+    btnRename.className = 'session-btn rename';
+    btnRename.innerHTML = '✏️';
+    btnRename.title = '이름 변경';
+    
+    const btnDelete = document.createElement('button');
+    btnDelete.className = 'session-btn delete';
+    btnDelete.innerHTML = '🗑️';
+    btnDelete.title = '대화 삭제';
+    
+    actions.appendChild(btnRename);
+    actions.appendChild(btnDelete);
+    item.appendChild(actions);
+    
+    sessionsList.appendChild(item);
+    
+    // Select Session
+    mainArea.addEventListener('click', () => {
+      if (session.id === currentSessionId) return;
+      if (isConnected || isWaitingForWakeWord) {
+        disconnect();
+      }
+      currentSessionId = session.id;
+      localStorage.setItem('gemini_current_session_id', currentSessionId);
+      renderSessionsList();
+      loadConversationHistory();
+      showNotification(`"${session.title}" 대화가 로드되었습니다.`, 'success');
+    });
+    
+    // Rename Session
+    btnRename.addEventListener('click', (e) => {
+      e.stopPropagation();
+      
+      const input = document.createElement('input');
+      input.type = 'text';
+      input.className = 'session-rename-input';
+      input.value = session.title;
+      
+      mainArea.replaceChild(input, titleSpan);
+      actions.style.display = 'none';
+      input.focus();
+      
+      const finalizeRename = () => {
+        const newTitle = input.value.trim();
+        if (newTitle && newTitle !== session.title) {
+          session.title = newTitle;
+          localStorage.setItem('gemini_sessions', JSON.stringify(sessions));
+        }
+        renderSessionsList();
+      };
+      
+      input.addEventListener('blur', finalizeRename);
+      input.addEventListener('keydown', (evt) => {
+        if (evt.key === 'Enter') {
+          finalizeRename();
+        }
+      });
+    });
+    
+    // Delete Session
+    btnDelete.addEventListener('click', (e) => {
+      e.stopPropagation();
+      
+      if (sessions.length <= 1) {
+        showNotification('최소 하나의 대화 세션은 유지되어야 합니다.', 'error');
+        return;
+      }
+      
+      if (confirm(`"${session.title}" 대화 세션을 정말 삭제하시겠습니까?`)) {
+        if (isConnected || isWaitingForWakeWord) {
+          disconnect();
+        }
+        sessions = sessions.filter(s => s.id !== session.id);
+        localStorage.setItem('gemini_sessions', JSON.stringify(sessions));
+        
+        if (currentSessionId === session.id) {
+          currentSessionId = sessions[0].id;
+          localStorage.setItem('gemini_current_session_id', currentSessionId);
+        }
+        
+        renderSessionsList();
+        loadConversationHistory();
+        showNotification('대화 세션이 삭제되었습니다.', 'success');
+      }
+    });
+  });
+}
+
+// Bind New Session Click Handler
+btnNewSession.addEventListener('click', () => {
+  if (isConnected || isWaitingForWakeWord) {
+    disconnect();
+  }
+  
+  const newSession = {
+    id: 'session_' + Date.now(),
+    title: '새 대화',
+    createdAt: Date.now(),
+    history: []
+  };
+  
+  sessions.push(newSession);
+  currentSessionId = newSession.id;
+  localStorage.setItem('gemini_sessions', JSON.stringify(sessions));
+  localStorage.setItem('gemini_current_session_id', currentSessionId);
+  
+  renderSessionsList();
+  loadConversationHistory();
+  showNotification('새 대화 세션이 시작되었습니다.', 'success');
+});
+
+function loadConversationHistory() {
+  transcriptContainer.innerHTML = '';
+  transcriptContainer.appendChild(chatPlaceholder);
+  chatPlaceholder.style.display = 'flex';
+  
+  currentUserBubble = null;
+  currentGeminiBubble = null;
+  lastSavedUserBubble = null;
+  
+  const activeSession = sessions.find(s => s.id === currentSessionId);
+  if (activeSession && activeSession.history && activeSession.history.length > 0) {
+    chatPlaceholder.style.display = 'none';
+    activeSession.history.forEach(item => {
+      if (item.role === 'user') {
+        appendUserBubbleStatic(item.text);
+      } else if (item.role === 'model') {
+        appendGeminiBubbleStatic(item.text);
+      }
+    });
+    scrollTranscriptToBottom();
   }
 }
 
@@ -914,25 +1094,23 @@ function saveCurrentTurnToHistory() {
     const userText = userBubble.textContent.trim();
     const geminiText = geminiBubble.textContent.trim();
     
-    // Ignore short commands/system messages if any
     if (userText && geminiText) {
-      let history = [];
-      const saved = localStorage.getItem('gemini_chat_history');
-      if (saved) {
-        try { history = JSON.parse(saved); } catch(e){}
+      const activeSession = sessions.find(s => s.id === currentSessionId);
+      if (activeSession) {
+        activeSession.history.push({ role: 'user', text: userText });
+        activeSession.history.push({ role: 'model', text: geminiText });
+        
+        // Auto-rename title if it's currently a default title
+        if (activeSession.title === '새 대화' || activeSession.title === '새 대화 세션') {
+          const cleanTitle = userText.length > 15 ? userText.substring(0, 15) + '...' : userText;
+          activeSession.title = cleanTitle;
+          renderSessionsList();
+        }
+        
+        localStorage.setItem('gemini_sessions', JSON.stringify(sessions));
+        lastSavedUserBubble = currentUserBubble;
+        console.log('Conversation turn saved to session history.');
       }
-      
-      history.push({ role: 'user', text: userText });
-      history.push({ role: 'model', text: geminiText });
-      
-      // Limit history to the last 50 entries to keep local storage lightweight
-      if (history.length > 50) {
-        history = history.slice(history.length - 50);
-      }
-      
-      localStorage.setItem('gemini_chat_history', JSON.stringify(history));
-      lastSavedUserBubble = currentUserBubble;
-      console.log('Conversation turn saved to history.');
     }
   }
 }
