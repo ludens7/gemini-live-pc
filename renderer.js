@@ -594,6 +594,8 @@ function handleServerMessage(message) {
     if (transcript) {
       appendOrUpdateUserTranscript(transcript);
       
+      const lowerTranscript = transcript.toLowerCase().replace(/\s+/g, '');
+      
       // Check for Wake Word in Standby Mode (using space-stripped fuzzy matching and phonetic variations)
       if (isWaitingForWakeWord) {
         const rawWakeWord = wakeWordInput.value.trim().toLowerCase();
@@ -607,9 +609,6 @@ function handleServerMessage(message) {
         if (rawWakeWord.includes('루덴스') || rawWakeWord.includes('ludens')) {
           variations.push('루덴', 'luden', 'lude', '루벤', 'ruben', '누덴', '우덴', '유덴', '루댄', 'ludens');
         }
-        
-        // Clean and prepare the user transcript by converting to lowercase and stripping spaces
-        const lowerTranscript = transcript.toLowerCase().replace(/\s+/g, '');
         
         // Check if any variation matches the transcript (or is a substring of it)
         const matched = variations.some(v => v && lowerTranscript.includes(v));
