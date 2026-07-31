@@ -51,6 +51,7 @@ let isTransitioningToStandby = false; // Flag to wait for goodbye speech before 
 // Session Manager State Variables
 let sessions = [];
 let currentSessionId = null;
+let lastSavedUserBubble = null;
 
 // Audio queue scheduling
 let nextStartTime = 0;
@@ -865,7 +866,6 @@ function scrollTranscriptToBottom() {
 }
 
 // --- CONVERSATION SESSION & HISTORY UTILITIES ---
-let lastSavedUserBubble = null;
 
 function initSessions() {
   const savedSessions = localStorage.getItem('gemini_sessions');
